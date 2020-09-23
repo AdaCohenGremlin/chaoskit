@@ -1,0 +1,47 @@
+# Drop this yaml file into your repo to set up this action. You need the
+# following secrets:
+#  - GHAS_GITHUB_SSH_KEY: an ssh key for a machine user that can access the
+#    service repo (which is where we currently have engineers.yaml). This can be
+#    found in lastpass with the name "gha-services deploy key"
+#  - GHAS_GITHUB_TOKEN: an API key that can access the gha-services repo
+#  - GHAS_DEPLOYMENT_HELPER_SLACK_TOKEN: A slack token for the bot
+name: Review notifier
+on:
+  pull_request:
+    types:
+      - synchronize
+      - ready_for_review
+      - review_requested
+  pull_request_review:
+    types: [submitted]
+jobs:
+  review_notifier:
+    runs-on: ubuntu-latest
+    steps:
+      - id: isNotDraft
+        name: Cancel if draft
+        if: github.event.pull_request.draft
+        run: exit 1 # exit failure, which will cause the other steps to skip
+        continue-on-error: true
+      - if: steps.isNotDraft.outcome != 'failure'
+        name: Turnstyle
+        uses: softprops/turnstyle@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.isNotDraft.outcome != 'failure'
+        name: Run reviewNotifier action
+        env:
+          GREMLIN_GITHUB_KEY: ${{ secrets.GHAS_GITHUB_SSH_KEY }}
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
+          SLACK_TOKEN: ${{ secrets.GHAS_DEPLOYMENT_HELPER_SLACK_TOKEN }}
+          GHAS_GITHUB_TOKEN: ${{ secrets.GHAS_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO: ${{ github.event.pull_request.head.repo.name }}
+        run: |
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "${GREMLIN_GITHUB_KEY}"
+          npm init -y
+          npm install git+ssh://git@github.com/gremlin/gha-services.git
+          npx reviewNotifier
